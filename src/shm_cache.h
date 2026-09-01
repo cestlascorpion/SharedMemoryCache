@@ -14,6 +14,7 @@ public:
     int set_ttl_ex(char *key, int ttl);
     int set_expires_ex(char *key, int expires);
     int get_ex(char *key, char *value, int lru);
+    int get_ex(char *key, char *value, uint32_t value_size, int lru);
     int del_ex(char *key);
 
     int set(const key_info &key_info, const value_info &value_info);

@@ -6,9 +6,14 @@ set(CMAKE_CXX_STANDARD 14)
 
 enable_language(C CXX ASM)
 
+set(SHM_ARCH_FLAGS)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|i[3-6]86)$")
+    set(SHM_ARCH_FLAGS "-mavx")
+endif()
+
 set(CMAKE_CXX_FLAGS "-Wall -Wextra -Werror -Wconversion -Wsizeof-pointer-memaccess \
     -Wfloat-equal -Wconversion-null -Woverflow -Wshadow \
-    -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -pthread -g -O3 -mavx")
+    -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -pthread -g -O3 ${SHM_ARCH_FLAGS}")
 
 set(SOURCE
         src/mem/memcpy_folly.S src/mem/memcpy_avx.h src/common_define.h src/common_types.cpp
@@ -44,3 +49,13 @@ install(FILES ${EXTRA} DESTINATION include/shmcache/mem)
 add_executable(hornet test/hornet.cpp ${SOURCE})
 
 add_executable(bardoom test/bardoom.cpp ${SOURCE})
+
+add_executable(smoke test/smoke.cpp ${SOURCE})
+
+add_executable(continued test/continued.cpp ${SOURCE})
+
+add_executable(attach test/attach.cpp ${SOURCE})
+
+add_executable(edge test/edge.cpp ${SOURCE})
+
+add_executable(normal test/normal.cpp ${SOURCE})

@@ -10,6 +10,7 @@
 shm_cache::shm_cache() { reset(); }
 
 shm_cache::~shm_cache() {
+    destroy();
     if (m_context.val_segments.items != nullptr) {
         free(m_context.val_segments.items);
         m_context.val_segments.items = nullptr;
@@ -62,14 +63,21 @@ int shm_cache::set_expires_ex(char *key, int expires) {
     return set_expires(key_info, (uint32_t)expires);
 }
 
-int shm_cache::get_ex(char *key, char *value, int lru) {
-    if (key == nullptr || value == nullptr || lru < 0) {
+int shm_cache::get_ex(char *key, char *value, uint32_t value_size, int lru) {
+    if (key == nullptr || value == nullptr || value_size == 0 || lru < 0) {
         printf("%s %s: pid: %d invalid parameter.\n", __FILE__, __func__, getpid());
         return EINVAL;
     }
     key_info key_info(key);
-    value_info value_info(value, 0, 0);
+    value_info value_info(value_size, value, 0, 0);
     return get(key_info, value_info, (uint32_t)lru);
+}
+
+int shm_cache::get_ex(char *key, char *value, int lru) {
+    (void)key;
+    (void)value;
+    (void)lru;
+    return EINVAL;
 }
 
 int shm_cache::del_ex(char *key) {
@@ -86,6 +94,9 @@ int shm_cache::set(const key_info &key_info, const value_info &value_info) {
     uint32_t start{}, end{}, lock_start{}, lock_end{};
     if (m_context.enable_stats) {
         start = local_stats::get_cpu_cycle();
+    }
+    if (key_info.data == nullptr || (value_info.data == nullptr && value_info.length > 0)) {
+        return EINVAL;
     }
     if (key_info.length > m_config.max_key_size) {
         printf("%s %s: pid: %d invalid key size.\n", __FILE__, __func__, getpid());
@@ -107,7 +118,10 @@ int shm_cache::set(const key_info &key_info, const value_info &value_info) {
         ++m_context.local_stats.w_lock.call_count;
         m_context.local_stats.w_lock.max_cost = std::max(lock_end - lock_start, m_context.local_stats.w_lock.max_cost);
     }
-    check_consistence();
+    if ((res = check_consistence()) != 0) {
+        shm_lock::write_unlock(m_context);
+        return res;
+    }
     ++m_context.memory->global_stats.set.total;
     res = shm_hashtable::ht_set(m_context, m_config, key_info, value_info);
     if (res == 0) {
@@ -129,6 +143,9 @@ int shm_cache::set(const key_info &key_info, const value_info &value_info) {
 
 int shm_cache::set_ttl(const key_info &key_info, uint32_t ttl) {
     int res;
+    if (key_info.data == nullptr) {
+        return EINVAL;
+    }
     if (key_info.length > m_config.max_key_size) {
         printf("%s %s: pid: %d invalid key size.\n", __FILE__, __func__, getpid());
         return ENAMETOOLONG;
@@ -140,7 +157,10 @@ int shm_cache::set_ttl(const key_info &key_info, uint32_t ttl) {
     if ((res = shm_lock::write_lock(m_context, m_config, m_context.memory->global_stats)) != 0) {
         return res;
     }
-    check_consistence();
+    if ((res = check_consistence()) != 0) {
+        shm_lock::write_unlock(m_context);
+        return res;
+    }
     res = shm_hashtable::ht_set_expires(m_context, key_info, ttl == 0 ? 0 : ttl + (uint32_t)time(nullptr));
     shm_lock::write_unlock(m_context);
     return res;
@@ -148,6 +168,9 @@ int shm_cache::set_ttl(const key_info &key_info, uint32_t ttl) {
 
 int shm_cache::set_expires(const key_info &key_info, uint32_t expires) {
     int res;
+    if (key_info.data == nullptr) {
+        return EINVAL;
+    }
     if (key_info.length > m_config.max_key_size) {
         printf("%s %s: pid: %d invalid key size.\n", __FILE__, __func__, getpid());
         return ENAMETOOLONG;
@@ -159,7 +182,10 @@ int shm_cache::set_expires(const key_info &key_info, uint32_t expires) {
     if ((res = shm_lock::write_lock(m_context, m_config, m_context.memory->global_stats)) != 0) {
         return res;
     }
-    check_consistence();
+    if ((res = check_consistence()) != 0) {
+        shm_lock::write_unlock(m_context);
+        return res;
+    }
     res = shm_hashtable::ht_set_expires(m_context, key_info, expires);
     shm_lock::write_unlock(m_context);
     return res;
@@ -170,6 +196,9 @@ int shm_cache::get(const key_info &key_info, value_info &value_info, uint32_t lr
     uint32_t start{}, end{}, lock_start{}, lock_end{};
     if (m_context.enable_stats) {
         start = local_stats::get_cpu_cycle();
+    }
+    if (key_info.data == nullptr || value_info.data == nullptr) {
+        return EINVAL;
     }
     if (key_info.length > m_config.max_key_size) {
         printf("%s %s: pid: %d invalid key size.\n", __FILE__, __func__, getpid());
@@ -187,7 +216,10 @@ int shm_cache::get(const key_info &key_info, value_info &value_info, uint32_t lr
         ++m_context.local_stats.r_lock.call_count;
         m_context.local_stats.r_lock.max_cost = std::max(lock_end - lock_start, m_context.local_stats.r_lock.max_cost);
     }
-    check_consistence();
+    if ((res = check_consistence()) != 0) {
+        shm_lock::read_unlock(m_context);
+        return res;
+    }
     ++m_context.memory->global_stats.get.total;
     res = shm_hashtable::ht_get(m_context, key_info, value_info, lru);
     if (res == 0) {
@@ -215,6 +247,9 @@ int shm_cache::del(const key_info &key_info) {
     if (m_context.enable_stats) {
         start = local_stats::get_cpu_cycle();
     }
+    if (key_info.data == nullptr) {
+        return EINVAL;
+    }
     if (key_info.length > m_config.max_key_size) {
         printf("%s %s: pid: %d invalid key size.\n", __FILE__, __func__, getpid());
         return ENAMETOOLONG;
@@ -222,7 +257,10 @@ int shm_cache::del(const key_info &key_info) {
     if ((res = shm_lock::write_lock(m_context, m_config, m_context.memory->global_stats)) != 0) {
         return res;
     }
-    check_consistence();
+    if ((res = check_consistence()) != 0) {
+        shm_lock::write_unlock(m_context);
+        return res;
+    }
     ++m_context.memory->global_stats.del.total;
     res = shm_hashtable::ht_del(m_context, key_info, false);
     if (res == 0) {
@@ -264,7 +302,12 @@ int shm_cache::remove() {
     if ((res = shm_lock::file_lock(m_context, m_config)) != 0) {
         return res;
     }
-    check_consistence();
+    if (m_context.ht_segment.item.base != nullptr) {
+        if ((res = check_consistence()) != 0) {
+            shm_lock::file_unlock(m_context);
+            return res;
+        }
+    }
     if ((res = shm_allocator::remove_all(m_config.memory_type, m_config.file, m_context.ht_segment,
                                          m_context.val_segments, m_context.enable_create)) != 0) {
         printf("%s %s: pid: %d remove_segment() failed.\n", __FILE__, __func__, getpid());
@@ -278,7 +321,10 @@ int shm_cache::clear_hashtable() {
     if ((res = shm_lock::write_lock(m_context, m_config, m_context.memory->global_stats)) != 0) {
         return res;
     }
-    check_consistence();
+    if ((res = check_consistence()) != 0) {
+        shm_lock::write_unlock(m_context);
+        return res;
+    }
     res = shm_hashtable::ht_clear(m_context, m_context.memory->global_stats);
     shm_lock::write_unlock(m_context);
     return res;
@@ -354,6 +400,9 @@ int shm_cache::load_config(const char *file) {
     if (str.empty()) {
         return -1;
     } else {
+        if (str.length() >= SHM_MAX_PATH_SIZE) {
+            return ENAMETOOLONG;
+        }
         memset(&m_config.file, 0, SHM_MAX_PATH_SIZE);
         memcpy(&m_config.file, str.c_str(), str.length());
     }
@@ -361,6 +410,9 @@ int shm_cache::load_config(const char *file) {
     if (str.empty()) {
         return -1;
     } else {
+        if (str.length() >= SHM_MAX_PATH_SIZE) {
+            return ENAMETOOLONG;
+        }
         memset(&m_config.dir, 0, SHM_MAX_PATH_SIZE);
         memcpy(&m_config.dir, str.c_str(), str.length());
     }
@@ -443,11 +495,17 @@ int shm_cache::load_config(const char *file) {
     } else {
         m_config.detect_w_dl_ticks = (uint32_t)integer;
     }
+    if (m_config.max_mem_mb == 0 || m_config.max_key_count == 0 || m_config.segment_size == 0 ||
+        m_config.block_size <= sizeof(block_entry) || m_config.max_key_size == 0 ||
+        m_config.max_key_size > SHM_BLOCK_SIZE - sizeof(block_entry) || m_config.max_value_size == 0 ||
+        m_config.min_mem_mb > m_config.max_mem_mb) {
+        return EINVAL;
+    }
     return 0;
 }
 
 int shm_cache::do_init(const bool create, const bool check) {
-    int res;
+    int res = 0;
     m_context.lock_fd = -1;
     m_context.enable_create = create;
     m_context.enable_stats = false;
@@ -457,6 +515,9 @@ int shm_cache::do_init(const bool create, const bool check) {
     uint32_t total;
     uint32_t offset_2base;
     get_unit_and_ht(basic_unit, hashtable, total, offset_2base);
+    if ((uint64_t)m_config.max_mem_mb * 1024 * 1024 <= total) {
+        return ENOMEM;
+    }
     bool exists = shm_memory::exists(m_config.memory_type, m_config.file, SHM_HT_SEGMENT_ID);
     if ((res = shm_allocator::init_ht_segment(m_config.memory_type, m_config.file, m_context.ht_segment.item,
                                               SHM_HT_SEGMENT_ID, total, m_context.enable_create)) != 0) {
@@ -487,16 +548,17 @@ int shm_cache::do_init(const bool create, const bool check) {
                 return res;
             }
         }
-        res = shm_allocator::open_val_segment(m_context, m_config);
-        if (res != 0) {
-            printf("%s %s: pid: %d open_val_segment() failed.\n", __FILE__, __func__, getpid());
+    }
+    res = shm_allocator::open_val_segment(m_context, m_config);
+    if (res != 0) {
+        printf("%s %s: pid: %d open_val_segment() failed.\n", __FILE__, __func__, getpid());
+    }
+    if (create && res == 0 && m_context.memory->basic_unit.segment.current < m_context.memory->basic_unit.segment.max) {
+        if ((res = shm_lock::write_lock(m_context, m_config, m_context.memory->global_stats)) != 0) {
+            printf("%s %s: pid: %d w_lock() failed.\n", __FILE__, __func__, getpid());
+            return res;
         }
-        if (res == 0 && m_context.memory->basic_unit.segment.current < m_context.memory->basic_unit.segment.max) {
-            if ((res = shm_lock::write_lock(m_context, m_config, m_context.memory->global_stats)) != 0) {
-                printf("%s %s: pid: %d w_lock() failed.\n", __FILE__, __func__, getpid());
-                return res;
-            }
-            while (m_context.ht_segment.item.size +
+        while (m_context.ht_segment.item.size +
                        (uint64_t)m_context.val_segments.current * (uint64_t)m_context.memory->basic_unit.segment.size <
                    (uint64_t)m_config.min_mem_mb * 1024 * 1024) {
                 if ((res = shm_allocator::create_val_segment(m_context, m_config)) != 0) {
@@ -505,9 +567,8 @@ int shm_cache::do_init(const bool create, const bool check) {
                 if (m_context.memory->basic_unit.segment.current >= m_context.memory->basic_unit.segment.max) {
                     break;
                 }
-            }
-            shm_lock::write_unlock(m_context);
         }
+        shm_lock::write_unlock(m_context);
     }
     return res;
 }

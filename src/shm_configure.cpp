@@ -1,5 +1,6 @@
 #include "shm_configure.h"
 #include <fstream>
+#include <stdexcept>
 #include <unistd.h>
 
 shm_configure::shm_configure(const char *file) {
@@ -22,10 +23,16 @@ shm_configure::shm_configure(const char *file) {
 int64_t shm_configure::get_integer_value(const std::string &key) {
     if (m_conf.find(key) != m_conf.end()) {
         std::string value = m_conf[key];
+        if (value.empty()) {
+            return -1;
+        }
         char end = value[value.length() - 1];
-        if (end >= '0' && end <= '9') {
-            return stoi(value);
-        } else {
+        try {
+            if (end >= '0' && end <= '9') {
+                size_t used = 0;
+                int64_t result = std::stoll(value, &used);
+                return used == value.length() ? result : -1;
+            } else {
             int64_t factor = 1;
             switch (end) {
             case 'K':
@@ -39,9 +46,17 @@ int64_t shm_configure::get_integer_value(const std::string &key) {
                 break;
             default:
                 printf("%s %s: pid: %d configure file has a wrong unit.\n", __FILE__, __func__, getpid());
+                return -1;
             }
-            value.pop_back();
-            return (int64_t)stoi(value) * factor;
+                value.pop_back();
+                size_t used = 0;
+                int64_t result = std::stoll(value, &used);
+                return used == value.length() ? result * factor : -1;
+            }
+        } catch (const std::invalid_argument &) {
+            return -1;
+        } catch (const std::out_of_range &) {
+            return -1;
         }
     } else {
         return -1;
@@ -53,7 +68,7 @@ std::string shm_configure::get_string_value(const std::string &key) {
         return m_conf[key];
     } else {
         printf("%s %s: pid: %d configure file may be wrong.\n", __FILE__, __func__, getpid());
-        return "null";
+        return std::string();
     }
 }
 

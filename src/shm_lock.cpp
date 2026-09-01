@@ -22,6 +22,13 @@ int shm_lock::lock_init(context &context) {
         printf("%s %s: pid: %d pthread_mutexattr_settype() failed.\n", __FILE__, __func__, getpid());
         return res;
     }
+#if defined(PTHREAD_MUTEX_ROBUST)
+    if ((res = pthread_mutexattr_setrobust(&mat, PTHREAD_MUTEX_ROBUST)) != 0) {
+        printf("%s %s: pid: %d pthread_mutexattr_setrobust() failed.\n", __FILE__, __func__, getpid());
+        pthread_mutexattr_destroy(&mat);
+        return res;
+    }
+#endif
     if ((res = pthread_mutex_init(&context.memory->global_lock.mutex, &mat)) != 0) {
         printf("%s %s: pid: %d pthread_mutex_init() failed.\n", __FILE__, __func__, getpid());
         return res;
@@ -42,12 +49,21 @@ int shm_lock::read_lock(context &context, const config &config, global_stats &gl
         if (ticks > config.detect_r_dl_ticks) {
             ticks = 0;
             pid_t pid = context.memory->global_lock.owner;
-            if ((pid == -1) || ((kill(pid, 0) != 0) && (errno == ESRCH || errno == ENOENT))) {
+            if (pid > 0 && (kill(pid, 0) != 0) && (errno == ESRCH || errno == ENOENT)) {
                 __sync_add_and_fetch(&global_stats.detect_deadlock, 1);
-                handle_deadlock(context, config, global_stats);
+                int recovery = handle_deadlock(context, config, global_stats);
+                if (recovery != 0) {
+                    return recovery;
+                }
             }
         }
     }
+#if defined(PTHREAD_MUTEX_ROBUST)
+    if (res == EOWNERDEAD) {
+        shm_hashtable::ht_clear(context, global_stats);
+        res = pthread_mutex_consistent(&context.memory->global_lock.mutex);
+    }
+#endif
     if (res != 0) {
         printf("%s %s: pid: %d error %d.\n", __FILE__, __func__, getpid(), res);
     } else {
@@ -77,12 +93,21 @@ int shm_lock::write_lock(context &context, const config &config, global_stats &g
         if (ticks > config.detect_w_dl_ticks) {
             ticks = 0;
             pid_t pid = context.memory->global_lock.owner;
-            if ((pid == -1) || ((kill(pid, 0) != 0) && (errno == ESRCH || errno == ENOENT))) {
+            if (pid > 0 && (kill(pid, 0) != 0) && (errno == ESRCH || errno == ENOENT)) {
                 __sync_add_and_fetch(&global_stats.detect_deadlock, 1);
-                handle_deadlock(context, config, global_stats);
+                int recovery = handle_deadlock(context, config, global_stats);
+                if (recovery != 0) {
+                    return recovery;
+                }
             }
         }
     }
+#if defined(PTHREAD_MUTEX_ROBUST)
+    if (res == EOWNERDEAD) {
+        shm_hashtable::ht_clear(context, global_stats);
+        res = pthread_mutex_consistent(&context.memory->global_lock.mutex);
+    }
+#endif
     if (res != 0) {
         printf("%s %s: pid: %d error %d.\n", __FILE__, __func__, getpid(), res);
     } else {
@@ -103,7 +128,7 @@ int shm_lock::write_unlock(context &context) {
 
 int shm_lock::file_lock(context &context, const config &config) {
     int res;
-    if (context.lock_fd > 0) {
+    if (context.lock_fd >= 0) {
         close(context.lock_fd);
     }
     mode_t old_mast = umask(0);
@@ -130,30 +155,20 @@ void shm_lock::file_unlock(context &context) {
 }
 
 int shm_lock::handle_deadlock(context &context, const config &config, global_stats &global_stats) {
-    int res;
-    if ((res = file_lock(context, config)) != 0) {
-        printf("%s %s: pid: %d file_lock() failed.\n", __FILE__, __func__, getpid());
-        return res;
-    }
-    printf("%s %s: pid: %d memset mutex.\n", __FILE__, __func__, getpid());
-    shm_hashtable::ht_clear(context, global_stats);
-    memset(&context.memory->global_lock.mutex, 0, sizeof(pthread_mutex_t));
-    res = lock_init(context);
-    if (res == 0) {
-        ++global_stats.unlock_deadlock;
-        printf("%s %s: pid: %d unlock deadlock.\n", __FILE__, __func__, getpid());
-    } else {
-        printf("%s %s: pid: %d handle deadlock failed.\n", __FILE__, __func__, getpid());
-    }
-    file_unlock(context);
-    return res;
+    (void)context;
+    (void)config;
+    (void)global_stats;
+    printf("%s %s: pid: %d cannot recover a non-robust mutex safely.\n", __FILE__, __func__, getpid());
+    return EDEADLK;
 }
 
 int shm_lock::file_write_lock(const int fd) {
     int res;
-    struct flock lock;
+    struct flock lock{};
     lock.l_type = F_WRLCK;
     lock.l_whence = SEEK_SET;
+    lock.l_start = 0;
+    lock.l_len = 0;
     do {
         if ((res = fcntl(fd, F_SETLKW, &lock)) != 0) {
             res = (errno != 0 ? errno : ENOMEM);

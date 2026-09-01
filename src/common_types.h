@@ -2,6 +2,7 @@
 #define SHMCACHE_COMMON_TYPES_H
 
 #include "common_define.h"
+#include <cerrno>
 #include <cstdint>
 #include <cstring>
 #include <ctime>
@@ -52,13 +53,13 @@ struct value_info {
     explicit value_info(char *val, uint32_t op, uint32_t ttl)
         : length((uint32_t)strlen(val))
         , options(op)
-        , expires(ttl != 0 ? 0 : time(nullptr) + ttl)
+        , expires(ttl == 0 ? 0 : time(nullptr) + ttl)
         , data(val) {}
 
     explicit value_info(uint32_t len, char *val, uint32_t op, int32_t ttl)
         : length(len)
         , options(op)
-        , expires(ttl == 0 ? 0 : (int32_t)time(nullptr) + ttl)
+        , expires(ttl == 0 ? 0 : time(nullptr) + (time_t)ttl)
         , data(val) {}
 };
 
@@ -98,7 +99,7 @@ struct block_addr {
         number = -1;
     }
 
-    bool valid_addr() { return index != -1 || number != -1; }
+    bool valid_addr() { return index >= 0 && number >= 0; }
 };
 
 struct block_entry {
@@ -200,7 +201,10 @@ struct hash_entry {
         memcpy_var(dst, value_info.data + offset, value_info.length - offset);
     }
 
-    void read_data(const val_segments &val_segments, value_info &value_info, uint32_t block_size) {
+    int read_data(const val_segments &val_segments, value_info &value_info, uint32_t block_size) {
+        if (value_info.length < value_len || value_info.data == nullptr) {
+            return ENOSPC;
+        }
         value_info.length = value_len;
         value_info.options = options;
         value_info.expires = expires;
@@ -224,6 +228,7 @@ struct hash_entry {
             src = cursor_entry->data;
         }
         memcpy_var(value_info.data + offset, src, value_len - offset);
+        return 0;
     }
 
     int check_entry(const val_segments &val_segments, uint32_t block_size);

@@ -90,6 +90,9 @@ int shm_hashtable::ht_set(context &context, const config &config, const key_info
     int64_t last_lru_offset = context.memory->busy_list.fake_entry.lru_prev;
     auto *last_lru_entry = (hash_entry *)(context.ht_segment.item.base + last_lru_offset);
     last_lru_entry->lru_next = new_offset;
+    if (last_lru_offset == context.memory->busy_list.offset_f2base) {
+        fake_entry->lru_next = new_offset;
+    }
     fake_entry->lru_prev = new_offset;
     new_entry->lru_prev = last_lru_offset;
     new_entry->lru_next = context.memory->busy_list.offset_f2base;
@@ -143,7 +146,10 @@ int shm_hashtable::ht_get(context &context, const key_info &key_info, value_info
             if (context.enable_stats) {
                 read_start = local_stats::get_cpu_cycle();
             }
-            current_entry->read_data(context.val_segments, value_info, context.memory->basic_unit.block.size);
+            res = current_entry->read_data(context.val_segments, value_info, context.memory->basic_unit.block.size);
+            if (res != 0) {
+                break;
+            }
             if (context.enable_stats) {
                 read_end = local_stats::get_cpu_cycle();
                 context.local_stats.r_data.all_cost += read_end - read_start;

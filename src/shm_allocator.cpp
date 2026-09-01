@@ -71,15 +71,13 @@ int shm_allocator::open_val_segment(context &context, const config &config) {
 
 int shm_allocator::remove_all(uint32_t type, const char *file, ht_segment &ht_segment, val_segments &val_segments,
                               bool create) {
-    int res;
-    res = shm_memory::remove(type, file, ht_segment.item.id, ht_segment.item.key);
+    (void)create;
+    int res = shm_memory::remove(type, file, ht_segment.item.id, ht_segment.item.key);
+    if (res != 0) {
+        return res;
+    }
     for (uint32_t index = 0; index < val_segments.current; ++index) {
         mem_segment *val_segment = val_segments.items + index;
-        res = init_val_segment(type, file, *val_segment, index, val_segment->size, create);
-        if (res != 0) {
-            printf("%s %s: pid: %d init_val_segment() failed.\n", __FILE__, __func__, getpid());
-            return res;
-        }
         int r = shm_memory::remove(type, file, val_segment->id, val_segment->key);
         if (r != 0) {
             res = r;

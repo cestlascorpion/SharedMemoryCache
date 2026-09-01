@@ -95,6 +95,7 @@ void *shm_memory::do_mmap(const char *file, uint32_t id, uint32_t size, bool cre
         if (fstat(fd, &st) != 0) {
             error = (errno != 0 ? errno : EPERM);
             printf("%s %s: pid: %d fstat() failed.\n", __FILE__, __func__, getpid());
+            close(fd);
             return nullptr;
         }
         if (st.st_size < (off_t)size) {
@@ -102,8 +103,10 @@ void *shm_memory::do_mmap(const char *file, uint32_t id, uint32_t size, bool cre
             need_truncate = true;
         } else {
             if (st.st_size > (off_t)size) {
-                error = (errno != 0 ? errno : EPERM);
+                error = EINVAL;
                 printf("%s %s: pid: %d fst.st_size > size.\n", __FILE__, __func__, getpid());
+                close(fd);
+                return nullptr;
             }
             need_truncate = false;
         }
@@ -133,9 +136,11 @@ void *shm_memory::do_mmap(const char *file, uint32_t id, uint32_t size, bool cre
         }
     }
     addr = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (addr == nullptr) {
+    if (addr == MAP_FAILED) {
         error = (errno != 0 ? errno : EPERM);
         printf("%s %s: pid: %d mmap() failed.\n", __FILE__, __func__, getpid());
+        close(fd);
+        return nullptr;
     }
     close(fd);
     error = 0;

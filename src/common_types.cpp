@@ -1,6 +1,10 @@
 #include "common_types.h"
 #include "shm_serialization.h"
+#include <vector>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 
 using std::string;
 using std::to_string;
@@ -171,8 +175,17 @@ string local_stats::serialize(const bool write, const char *dir) {
 }
 
 void local_stats::init_cpu_info() {
-#ifdef __APPLE__
-    cpu_freq = 2300; // 2.3GHz of my Mac
+#if !defined(__i386__) && !defined(__x86_64__)
+    cpu_freq = 1000;
+    return;
+#elif defined(__APPLE__)
+    uint64_t hz = 0;
+    size_t size = sizeof(hz);
+    if (sysctlbyname("hw.cpufrequency", &hz, &size, nullptr, 0) == 0 && hz > 0) {
+        cpu_freq = (double)hz / 1000000.0;
+    } else {
+        cpu_freq = 1000;
+    }
     return;
 #endif
     FILE *fp;
@@ -213,6 +226,7 @@ void local_stats::init_cpu_info() {
 }
 
 uint32_t local_stats::get_cpu_cycle() {
+#if defined(SHM_RDTSC)
     union cpu_cycle {
         struct t_i32 {
             uint32_t l;
@@ -222,6 +236,11 @@ uint32_t local_stats::get_cpu_cycle() {
     } c{};
     SHM_RDTSC(c.i32.l, c.i32.h);
     return c.t;
+#else
+    struct timespec ts{};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)((uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec);
+#endif
 }
 
 void stats_output::show() {
@@ -383,17 +402,17 @@ int busy_list::check_list(const ht_segment &ht_segment) {
         printf("invalid busy list! entry_current > 0, fake_entry <-> fake_entry.\n");
         return -1;
     }
-    int64_t forward[entry_current];
-    int64_t backward[entry_current];
+    std::vector<int64_t> forward(entry_current);
+    std::vector<int64_t> backward(entry_current);
     int64_t what = fake_entry.lru_next;
     int64_t tahw = fake_entry.lru_prev;
     unsigned count = 0;
     while (what != offset_f2base || tahw != offset_f2base) {
         if (count == 0) {
-            printf("first entry: #%u offset = %ld tesoof = %ld \n", count, what, tahw);
+            printf("first entry: #%u offset = %lld tesoof = %lld \n", count, (long long)what, (long long)tahw);
         }
         if (count == entry_current - 1) {
-            printf(" last entry: #%u offset = %ld tesoof = %ld \n", count, what, tahw);
+            printf(" last entry: #%u offset = %lld tesoof = %lld \n", count, (long long)what, (long long)tahw);
         }
         forward[count] = what;
         backward[count] = tahw;

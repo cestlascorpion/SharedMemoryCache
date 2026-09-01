@@ -25,7 +25,9 @@
 #define SHM_MEM_ALIGN_BYTE(x) (((x) + 7u) & (~7u))
 #define SHM_MEM_ALIGN(x, align) (((x) + ((align)-1u)) & (~((align)-1u)))
 
+#if defined(__i386__) || defined(__x86_64__)
 #define SHM_RDTSC(low, high) __asm__ __volatile__("rdtsc" : "=a"(low), "=d"(high))
+#endif
 
 #define SHM_ORIGIN_MEMCPY
 #if defined(__x86_64__) && defined(__linux__) && !defined(__CYGWIN__) && !defined(SHM_ORIGIN_MEMCPY)
