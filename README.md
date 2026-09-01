@@ -50,7 +50,7 @@ On macOS ARM, run the tests from the selected build directory:
 Test coverage:
 
 - `smoke` covers basic set/get, TTL, buffer bounds, and cleanup
-- `continued` covers legacy API rejection, fork-based sharing, and TTL behavior
+- `continued` covers fork-based sharing, buffer handling, and TTL behavior
 - `edge` covers values spanning multiple blocks, multi-segment growth, overwrites, and invalid parameters
 - `normal` covers expiration/deletion APIs, statistics, and concurrent multi-process reads and writes
 - `attach` covers independent-process attachment and key recycling

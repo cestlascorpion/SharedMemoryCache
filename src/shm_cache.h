@@ -13,7 +13,6 @@ public:
     int set_ex(char *key, char *value, int ttl, int op);
     int set_ttl_ex(char *key, int ttl);
     int set_expires_ex(char *key, int expires);
-    int get_ex(char *key, char *value, int lru);
     int get_ex(char *key, char *value, uint32_t value_size, int lru);
     int del_ex(char *key);
 

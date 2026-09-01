@@ -18,8 +18,6 @@ int main() {
     char out[16] = {};
     assert(cache.get_ex(key, out, sizeof(out), 0) == 0);
     assert(std::memcmp(out, val, sizeof(val) - 1) == 0);
-    assert(cache.get_ex(key, out, 0) == EINVAL);
-
     sleep(2);
     assert(cache.get_ex(key, out, sizeof(out), 0) == ETIMEDOUT);
 

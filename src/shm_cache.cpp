@@ -73,13 +73,6 @@ int shm_cache::get_ex(char *key, char *value, uint32_t value_size, int lru) {
     return get(key_info, value_info, (uint32_t)lru);
 }
 
-int shm_cache::get_ex(char *key, char *value, int lru) {
-    (void)key;
-    (void)value;
-    (void)lru;
-    return EINVAL;
-}
-
 int shm_cache::del_ex(char *key) {
     if (key == nullptr) {
         printf("%s %s: pid: %d invalid parameter.\n", __FILE__, __func__, getpid());
