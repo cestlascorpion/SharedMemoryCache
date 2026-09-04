@@ -1,12 +1,13 @@
 #include "shm_serialization.h"
 #include <fstream>
+#include <utility>
 #include <unistd.h>
 
 void shm_serialization::put_data(std::string &lvalue, std::string &rvalue) {
     if (lvalue.empty() || rvalue.empty()) {
         return;
     }
-    m_content.emplace_back(move(lvalue), move(rvalue));
+    m_content.emplace_back(std::move(lvalue), std::move(rvalue));
 }
 
 void shm_serialization::write_data(std::string &dir) {
